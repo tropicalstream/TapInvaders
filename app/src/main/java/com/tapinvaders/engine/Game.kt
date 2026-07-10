@@ -119,6 +119,9 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
     var invuln = 0f; private set
     var playerAlive = false; private set
     private var fireCooldown = 0f
+    var roll = 0f; private set               // FPS ship banks into a strafe
+    var muzzle = 0f; private set             // FPS muzzle flash timer
+    private var incomingT = 0f               // FPS proximity-dread ticker
 
     // --- projectiles & pickups ---
     val bolts = ArrayList<Bolt>()
@@ -189,24 +192,16 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
     }
 
     /**
-     * Latched movement: swipe once to start sliding, swipe against the motion
-     * to stop, swipe again to go the other way. dir: -1 left, +1 right.
+     * Hold-to-move: the cannon moves ONLY while the finger is on the pad
+     * (dir -1/+1 while held past the dead-zone, 0 re-centers or lifts).
+     * The Activity calls this continuously during a touch and with 0 on
+     * finger-up — release means an immediate, dead stop.
      */
-    fun move(dir: Int) {
-        when (state) {
-            GameState.TITLE -> select(dir)
-            GameState.GAME_OVER -> toTitle()
-            GameState.PLAYING, GameState.WAVE_CLEAR -> {
-                if (!playerAlive) return
-                moveDir = when (moveDir) {
-                    dir -> dir           // already going that way
-                    0 -> dir             // start
-                    else -> 0            // counter-swipe = stop
-                }
-                host.sfx(Sfx.MOVE, if (dir < 0) 0.9f else 1.1f, 0.4f)
-            }
-            else -> {}
-        }
+    fun holdMove(dir: Int) {
+        if (state != GameState.PLAYING && state != GameState.WAVE_CLEAR) return
+        if (!playerAlive) { moveDir = 0; return }
+        if (dir != 0 && moveDir == 0) host.sfx(Sfx.MOVE, if (dir < 0) 0.9f else 1.1f, 0.35f)
+        moveDir = dir
     }
 
     fun tap() {
@@ -238,6 +233,7 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
             bolts.add(Bolt(px, playerZ - 1.2f, pierce))
         }
         fireCooldown = if (activePower == PWR_RAPID) 0.07f else 0.14f
+        muzzle = 0.09f
         host.sfx(Sfx.FIRE, if (pierce) 0.8f else 1f, 0.75f)
     }
 
@@ -386,12 +382,15 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         invuln = maxOf(0f, invuln - dt)
         if (activePower == PWR_SHIELD) invuln = maxOf(invuln, 0.05f)
         fireCooldown = maxOf(0f, fireCooldown - dt)
+        muzzle = maxOf(0f, muzzle - dt)
         if (moveDir != 0) {
             px += moveDir * PLAYER_SPEED * dt
             val bound = halfW - 1.4f
-            if (px <= -bound) { px = -bound; moveDir = 0 }
-            if (px >= bound) { px = bound; moveDir = 0 }
+            px = px.coerceIn(-bound, bound)
         }
+        // FPS ship banks into the strafe and levels out on release.
+        val targetRoll = -moveDir * 0.42f
+        roll += (targetRoll - roll) * (1f - kotlin.math.exp(-9f * dt))
     }
 
     /** The rack marches on a beat that quickens as it thins — the classic pulse. */
@@ -459,8 +458,13 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         }
     }
 
+    /** How far along its dive a missile is: 0 at spawn, 1 at the player line. */
+    fun missileProx(m: InvMissile): Float =
+        (1f - (playerZ - m.z) / (playerZ - m.spawnZ)).coerceIn(0f, 1f)
+
     private fun stepMissiles(dt: Float, slow: Float) {
         val speed = (6.2f + wave * 0.45f).coerceAtMost(12f) * slow
+        var nearest = -1f
         var i = missiles.size - 1
         while (i >= 0) {
             val m = missiles[i]
@@ -474,7 +478,18 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
                 playerHit()
                 i--; continue
             }
+            if (isFps) nearest = maxOf(nearest, missileProx(m))
             i--
+        }
+
+        // FPS dread: a blip that quickens and rises as the closest fireball
+        // bears down — the sound of incoming before it fills the screen.
+        if (isFps && nearest >= 0f && playerAlive) {
+            incomingT -= dt
+            if (incomingT <= 0f) {
+                incomingT = 0.55f - 0.46f * nearest
+                host.sfx(Sfx.INCOMING, 0.75f + nearest * 0.9f, 0.25f + 0.55f * nearest)
+            }
         }
     }
 
@@ -486,6 +501,23 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
             var consumed = b.z < rackStartZ - 8f
             // vs shields (your own shots chew your own cover — tradition)
             if (!consumed && !b.pierce && hitShield(b.x, b.z)) consumed = true
+            // FPS: enemy fire can be shot down — the fireball is the target.
+            if (!consumed && isFps) {
+                var mi = missiles.size - 1
+                while (mi >= 0) {
+                    val m = missiles[mi]
+                    val rad = 0.8f + missileProx(m) * 0.9f   // bigger = easier, as it grows
+                    if (abs(b.x - m.x) < rad && abs(b.z - m.z) < 1.3f) {
+                        missiles.removeAt(mi)
+                        addScore(10)
+                        explode(m.x, 0.9f + (m.spawnY - 0.9f) * missileProx(m).let { 1f - it },
+                            m.z, 0.05f, 14, 3f)
+                        host.sfx(Sfx.POP, 0.9f + rng.nextFloat() * 0.2f)
+                        if (!b.pierce) { consumed = true; break }
+                    }
+                    mi--
+                }
+            }
             // vs invaders
             if (!consumed || b.pierce) {
                 for (r in ROWS - 1 downTo 0) {

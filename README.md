@@ -19,16 +19,20 @@ Swipe on the title to choose, tap to clock in:
   particle bursts, the sweeper's deadpan voice lines, and **power-ups that
   drop from dying invaders** — Rapid Fire, Triple Shot, Shield, Piercing
   Bolts, Time Warp — caught with the cannon, ten seconds each.
-- **FPS 3D** — stand on the firing line. A perspective camera at the cannon:
-  the formation is a glowing wall leaning in over you, missiles come *at*
-  you, and you strafe the rail to dodge and line up columns. No bunkers up
-  here. Crosshair HUD.
+- **FPS 3D** — stand on the firing line, behind the stick of a full 3D
+  wireframe interceptor riding the bottom of your view — raised spine, swept
+  wings, tip fins, twin flickering engine pods — that **banks into every
+  strafe** and muzzle-flashes off the nose. The formation is a glowing wall
+  leaning in over you, and its fire comes *at* you as spinning fireballs
+  that **grow as they close** — big enough to shoot down (+10), urgent
+  enough that a proximity blip quickens and rises the nearer the closest
+  one gets. No bunkers up here. Crosshair HUD.
 
 ## Controls — two gestures, no settings menu
 
 | Gesture | Action |
 |---|---|
-| **Swipe** (horizontal) | Latched movement: swipe to start sliding, swipe against the motion to stop, again to reverse. FPS: same, but you're strafing the rail. |
+| **Hold + drag** (horizontal) | Move while your finger is on the pad — the cannon **stops the instant you lift**. Drag back through center to reverse without lifting. |
 | **Tap** | Fire. Also selects on the title and restarts after game over. |
 | Swipe (vertical) | Title: choose mode. Game over: back to mode select. |
 

@@ -97,11 +97,13 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
 
         val fpsCam = game.mode == Mode.FPS && game.state != GameState.TITLE
         if (fpsCam) {
+            // Slightly above and behind the ship, so the hull rides the bottom
+            // of the view while the rack looms ahead.
             Matrix.perspectiveM(proj, 0, 58f, aspect, 0.3f, 240f)
             Matrix.setLookAtM(
                 view, 0,
-                game.px, 1.7f, game.playerZ + 0.5f,
-                game.px, 3.6f, game.playerZ - 22f,
+                game.px, 3.1f, game.playerZ + 7.5f,
+                game.px, 3.4f, game.playerZ - 22f,
                 0f, 1f, 0f
             )
         } else {
@@ -133,7 +135,7 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
 
         buildRack()
         if (!game.isFps) buildShields()
-        if (game.playerAlive && !game.isFps) buildCannon()
+        if (game.playerAlive) { if (game.isFps) buildShip3D() else buildCannon() }
         buildBolts()
         buildMissiles()
         buildDrops()
@@ -246,6 +248,48 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         }
     }
 
+    /**
+     * The FPS hull: a real 3D wireframe interceptor — raised spine and keel,
+     * swept wings with tip fins, twin engine pods — that banks into strafes
+     * and flashes its gun. Drawn from SHIP segments (x,y,z pairs) rolled
+     * around the fuselage axis.
+     */
+    private fun buildShip3D() {
+        val x = game.px; val z = game.playerZ
+        val blink = if (game.invuln > 0f) (0.45f + 0.55f * sin(game.time * 20f)) else 1f
+        val cr = 0.35f; val cg = 0.95f; val cb = 1f
+        val cosR = cos(game.roll); val sinR = sin(game.roll)
+        var i = 0
+        while (i < SHIP.size) {
+            val lx0 = SHIP[i]; val ly0 = SHIP[i + 1]; val lz0 = SHIP[i + 2]
+            val lx1 = SHIP[i + 3]; val ly1 = SHIP[i + 4]; val lz1 = SHIP[i + 5]
+            lines.line(
+                x + lx0 * cosR - ly0 * sinR, 0.55f + lx0 * sinR + ly0 * cosR, z + lz0,
+                x + lx1 * cosR - ly1 * sinR, 0.55f + lx1 * sinR + ly1 * cosR, z + lz1,
+                cr, cg, cb, blink
+            )
+            i += 6
+        }
+        // canopy glint + engine glow (flickering ember pair)
+        fx.v(x - 1.05f * sinR, 0.55f + 1.05f * cosR, z - 0.3f, 1f, 1f, 1f, blink)
+        val flick = 0.7f + 0.3f * sin(game.time * 31f)
+        hsv(0.07f, 1f, 1f)
+        fx.v(x + (-0.85f * cosR - 0.4f * sinR), 0.55f + (-0.85f * sinR + 0.4f * cosR), z + 1.7f, rgb[0], rgb[1], rgb[2], flick * blink)
+        fx.v(x + (0.85f * cosR - 0.4f * sinR), 0.55f + (0.85f * sinR + 0.4f * cosR), z + 1.7f, rgb[0], rgb[1], rgb[2], flick * blink)
+        // muzzle flash off the nose while firing
+        if (game.muzzle > 0f) {
+            val k = game.muzzle / 0.09f
+            hsv(0.13f, 0.8f, 1f)
+            lines.line(x, 1.05f, z - 3.2f, x - 0.5f, 1.05f, z - 2.5f, rgb[0], rgb[1], rgb[2], k)
+            lines.line(x, 1.05f, z - 3.2f, x + 0.5f, 1.05f, z - 2.5f, rgb[0], rgb[1], rgb[2], k)
+            fx.v(x, 1.05f, z - 3.3f, 1f, 1f, 0.8f, k)
+        }
+        if (game.invuln > 0f && game.activePower != Game.PWR_SHIELD) {
+            hsv((game.time * 0.5f) % 1f, 0.6f, 1f)
+            ring(x, 0.8f, z, 2.6f, 12, rgb[0], rgb[1], rgb[2], 0.4f * blink)
+        }
+    }
+
     private fun buildShields() {
         if (game.mode == Mode.CLASSIC) { rgb[0] = 0.3f; rgb[1] = 0.85f; rgb[2] = 0.35f }
         else hsv((game.time * 0.04f + 0.3f) % 1f, 0.6f, 0.9f)
@@ -292,16 +336,30 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         for (i in 0 until ms.size) {
             val m = ms[i]
             val wig = sin(game.time * 24f + i) * 0.15f
-            if (game.mode == Mode.REMIX) hsv((game.time * 0.6f + i * 0.2f) % 1f, 0.85f, 1f)
-            else if (game.isFps) { rgb[0] = 1f; rgb[1] = 0.3f; rgb[2] = 0.25f }
-            else { rgb[0] = 1f; rgb[1] = 1f; rgb[2] = 0.55f }
-            val r = rgb[0]; val g = rgb[1]; val b = rgb[2]
             if (game.isFps) {
-                val ratio = ((m.z - game.playerZ) / (m.spawnZ - game.playerZ)).coerceIn(0f, 1f)
-                val y = 0.9f + (m.spawnY - 0.9f) * ratio
-                lines.line(m.x + wig, y + 0.3f, m.z - 0.9f, m.x - wig, y, m.z, r, g, b, 0.95f)
-                fx.v(m.x, y, m.z, r, g, b, 1f)
+                // A fireball that GROWS as it bears down — the whole point:
+                // it becomes an easier and more urgent target the closer it is.
+                val prox = game.missileProx(m)
+                val y = 0.9f + (m.spawnY - 0.9f) * (1f - prox)
+                val s = 0.35f + 1.5f * prox
+                hsv(0.02f + 0.06f * sin(game.time * 18f + i), 1f, 1f)
+                val r = rgb[0]; val g = rgb[1]; val b = rgb[2]
+                // spinning starburst
+                for (k in 0 until 4) {
+                    val a2 = game.time * 7f + k * 0.7854f
+                    lines.line(
+                        m.x - cos(a2) * s, y - sin(a2) * s * 0.8f, m.z,
+                        m.x + cos(a2) * s, y + sin(a2) * s * 0.8f, m.z,
+                        r, g, b, 0.85f
+                    )
+                }
+                // heat trail back toward the rack
+                lines.line(m.x + wig, y + 0.4f, m.z - 1.6f, m.x, y, m.z, r, g, b, 0.5f)
+                fx.v(m.x, y, m.z, 1f, 0.9f, 0.6f, 0.9f)
             } else {
+                if (game.mode == Mode.REMIX) hsv((game.time * 0.6f + i * 0.2f) % 1f, 0.85f, 1f)
+                else { rgb[0] = 1f; rgb[1] = 1f; rgb[2] = 0.55f }
+                val r = rgb[0]; val g = rgb[1]; val b = rgb[2]
                 lines.line(m.x + wig, 0.95f, m.z - 0.45f, m.x - wig, 0.45f, m.z + 0.45f, r, g, b, 0.95f)
                 fx.v(m.x, 0.7f, m.z, r, g, b, 0.9f)
             }
@@ -557,6 +615,46 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
             -0.85f, 0.75f, 0.85f, 0.75f,
             -0.3f, 1.45f, -0.3f, 1.2f, 0.3f, 1.45f, 0.3f, 1.2f,
             -0.35f, 0.75f, -0.6f, 0.35f, 0.35f, 0.75f, 0.6f, 0.35f,
+        )
+
+        // The FPS interceptor: 3D line segments (x0,y0,z0, x1,y1,z1)*, local
+        // space, nose toward -z. Raised spine, keel, swept wings, tip fins,
+        // twin engine pods, gun barrel.
+        val SHIP = floatArrayOf(
+            // spine
+            0f, 0.5f, -2.4f, 0f, 1.05f, -0.3f,
+            0f, 1.05f, -0.3f, 0f, 0.9f, 1.5f,
+            // keel
+            0f, 0.5f, -2.4f, 0f, 0.15f, -1.1f,
+            0f, 0.15f, -1.1f, 0f, 0.1f, 1.3f,
+            0f, 0.1f, 1.3f, 0f, 0.9f, 1.5f,
+            // fuselage sides
+            0f, 0.5f, -2.4f, -0.4f, 0.5f, -0.5f,
+            0f, 0.5f, -2.4f, 0.4f, 0.5f, -0.5f,
+            -0.4f, 0.5f, -0.5f, -0.5f, 0.5f, 1.1f,
+            0.4f, 0.5f, -0.5f, 0.5f, 0.5f, 1.1f,
+            -0.5f, 0.5f, 1.1f, 0f, 0.9f, 1.5f,
+            0.5f, 0.5f, 1.1f, 0f, 0.9f, 1.5f,
+            // canopy braces
+            -0.4f, 0.5f, -0.5f, 0f, 1.05f, -0.3f,
+            0.4f, 0.5f, -0.5f, 0f, 1.05f, -0.3f,
+            -0.5f, 0.5f, 1.1f, 0f, 1.05f, -0.3f,
+            0.5f, 0.5f, 1.1f, 0f, 1.05f, -0.3f,
+            // wings: leading + trailing edges to swept tips
+            -0.4f, 0.5f, -0.5f, -2.4f, 0.45f, 1.0f,
+            -0.5f, 0.5f, 1.1f, -2.4f, 0.45f, 1.0f,
+            0.4f, 0.5f, -0.5f, 2.4f, 0.45f, 1.0f,
+            0.5f, 0.5f, 1.1f, 2.4f, 0.45f, 1.0f,
+            // wingtip fins
+            -2.4f, 0.45f, 1.0f, -2.4f, 1.15f, 1.3f,
+            2.4f, 0.45f, 1.0f, 2.4f, 1.15f, 1.3f,
+            // engine pods
+            -0.5f, 0.5f, 1.1f, -0.85f, 0.4f, 1.7f,
+            0.5f, 0.5f, 1.1f, 0.85f, 0.4f, 1.7f,
+            -0.85f, 0.4f, 1.7f, 0f, 0.9f, 1.5f,
+            0.85f, 0.4f, 1.7f, 0f, 0.9f, 1.5f,
+            // gun barrel
+            0f, 0.5f, -2.4f, 0f, 0.55f, -3.1f,
         )
 
         private const val VERT = """#version 300 es

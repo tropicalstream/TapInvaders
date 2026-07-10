@@ -46,7 +46,9 @@ class Sfx(private val context: Context) {
         const val PWR_GET = 20
         const val PWR_END = 21
         const val MOVE = 22
-        private const val COUNT = 23
+        const val INCOMING = 23    // proximity blip: enemy fire closing in (FPS)
+        const val POP = 24         // enemy fire shot down mid-air
+        private const val COUNT = 25
         private const val RATE = 22050
     }
 
@@ -123,6 +125,12 @@ class Sfx(private val context: Context) {
                 ids[PWR_GET] = load(dir, "pget", arpeggio(intArrayOf(659, 880, 1174, 1568), 55, 0.75f))
                 ids[PWR_END] = load(dir, "pend", buf(260) { t -> sine(700f - 380f * t, t) * exp(-t * 8f) * 0.4f })
                 ids[MOVE] = load(dir, "move", buf(35) { t -> sine(950f, t) * exp(-t * 60f) * 0.5f })
+                // The dread blip: pitched up and hastened by the game as fire closes in.
+                ids[INCOMING] = load(dir, "inc", buf(90) { t -> (sine(680f + 700f * t, t) * 0.6f + sq(340f, t) * 0.15f) * exp(-t * 18f) })
+                ids[POP] = load(dir, "pop", buf(130) { t ->
+                    val crush = if ((t * 52f).toInt() % 2 == 0) 1f else 0.5f
+                    ((noise() * 0.6f + sine(500f - 250f * t, t) * 0.4f) * crush) * exp(-t * 18f)
+                })
                 loaded = true
             }
         }

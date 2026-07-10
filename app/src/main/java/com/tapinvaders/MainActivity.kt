@@ -21,10 +21,11 @@ import kotlin.math.max
 
 /**
  * TapInvaders. Two gestures, no settings menu:
- *  - SWIPE horizontally = latched movement: swipe to start sliding, swipe
- *    against the motion to stop, again to reverse. On the title / game-over
- *    screens any swipe navigates. (Raw dx sign is inverted vs the physical
- *    gesture on this hardware — same mapping the predecessor settled on.)
+ *  - HOLD-AND-DRAG = movement: the cannon moves only while the finger is on
+ *    the pad past a small dead-zone, and STOPS THE INSTANT it lifts. Drag
+ *    back through center to reverse without lifting. On the title /
+ *    game-over screens a swipe navigates instead. (Raw dx sign is inverted
+ *    vs the physical gesture on this hardware — the established mapping.)
  *  - TAP (arrives as a KEY on the glasses) = fire / select / restart.
  */
 class MainActivity : Activity(), GameHost {
@@ -40,6 +41,8 @@ class MainActivity : Activity(), GameHost {
     private var lastAction = 0L
     private var downX = 0f
     private var downY = 0f
+    private var maxDisp = 0f      // farthest the finger strayed (tap classifier)
+    private var heldDir = 0       // movement currently held by this touch
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,19 +82,33 @@ class MainActivity : Activity(), GameHost {
     }
 
     private fun tap() = act { game.tap() }
-    private fun move(dir: Int) = act { game.move(dir) }
+    private fun hold(dir: Int) {
+        if (dir == heldDir) return
+        heldDir = dir
+        glView.queueEvent { game.holdMove(dir) }
+    }
     private fun select(d: Int) = act { game.select(d) }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_UP) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_DPAD_CENTER,
-                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_SPACE -> { tap(); return true }
-                KeyEvent.KEYCODE_DPAD_LEFT -> { move(-1); return true }
-                KeyEvent.KEYCODE_DPAD_RIGHT -> { move(1); return true }
-                KeyEvent.KEYCODE_DPAD_UP -> { select(-1); return true }
-                KeyEvent.KEYCODE_DPAD_DOWN -> { select(1); return true }
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_SPACE -> {
+                if (event.action == KeyEvent.ACTION_UP) tap()
+                return true
             }
+            // Keys mirror the pad: move while held, stop on release.
+            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) hold(-1)
+                if (event.action == KeyEvent.ACTION_UP) hold(0)
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) hold(1)
+                if (event.action == KeyEvent.ACTION_UP) hold(0)
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_UP -> { if (event.action == KeyEvent.ACTION_UP) select(-1); return true }
+            KeyEvent.KEYCODE_DPAD_DOWN -> { if (event.action == KeyEvent.ACTION_UP) select(1); return true }
         }
         return super.dispatchKeyEvent(event)
     }
@@ -99,20 +116,35 @@ class MainActivity : Activity(), GameHost {
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         // Ignore the left temple volume pad.
         if (ev.device?.name?.contains("cyttsp6", ignoreCase = true) == true) return true
+        val dead = max(16f, 0.02f * resources.displayMetrics.widthPixels)
         when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downX = ev.x; downY = ev.y }
-            MotionEvent.ACTION_UP -> {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.x; downY = ev.y
+                maxDisp = 0f
+                heldDir = 0
+            }
+            MotionEvent.ACTION_MOVE -> {
                 val dx = ev.x - downX
                 val dy = ev.y - downY
-                val dead = max(16f, 0.02f * resources.displayMetrics.widthPixels)
-                if (abs(dx) < dead && abs(dy) < dead) { tap(); return true }
-                if (abs(dx) >= abs(dy)) {
-                    // Horizontal sign inverted vs the physical gesture on this pad.
-                    move(if (dx < 0) -1 else 1)
-                } else {
-                    select(if (dy < 0) -1 else 1)
-                }
+                maxDisp = max(maxDisp, max(abs(dx), abs(dy)))
+                // Live movement while the finger is down: direction from the
+                // current pull (inverted sign per this pad), dead-zone centered
+                // on the touch-down point. Dragging back through center stops;
+                // through to the other side reverses — all without lifting.
+                if (abs(dx) >= dead && abs(dx) >= abs(dy)) hold(if (dx < 0) -1 else 1)
+                else hold(0)
             }
+            MotionEvent.ACTION_UP -> {
+                // Finger off = full stop, immediately.
+                hold(0)
+                val dx = ev.x - downX
+                val dy = ev.y - downY
+                if (maxDisp < dead) { tap(); return true }
+                // A real swipe still navigates the menus.
+                if (abs(dy) > abs(dx)) select(if (dy < 0) -1 else 1)
+                else act { game.select(if (dx < 0) -1 else 1) }
+            }
+            MotionEvent.ACTION_CANCEL -> hold(0)
         }
         return true
     }
