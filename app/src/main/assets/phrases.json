@@ -1,0 +1,32 @@
+{
+  "start": "Space sweeper, clocking in. The cosmos is filthy again and apparently I'm the only one with a broom.",
+  "wave_1": "Swept. Not that anyone will send a card.",
+  "wave_2": "Planet saved. Again. Try to contain the parades.",
+  "wave_3": "All that debris, gone. Rather like my enthusiasm.",
+  "wave_4": "Another sector spotless. I'm ecstatic. This is me, ecstatic.",
+  "wave_5": "An entire formation, filed under swept. They'll only send another.",
+  "wave_6": "Filed the rubble under D, for dealt with.",
+  "wave_7": "The empire keeps printing invaders. I keep un-printing them. Nobody says thank you.",
+  "saucer_big": [
+    "Oh good, an imperial cruiser. They never wipe their boots.",
+    "Another cruiser. I do hope they brought a mop this time. They never do.",
+    "Ah, the empire. Sending capital ships to fight a man with a broom.",
+    "A cruiser. Do they teach parking at the academy? Clearly not.",
+    "Here comes several billion credits of hardware, aimed at me. Lovely.",
+    "The empire's finest. Which, frankly, explains quite a lot.",
+    "A cruiser drops by. I shall add 'existential dread' to today's chores.",
+    "Big, shiny, over-armed, and lost. Typical imperial tourist.",
+    "That's a warship. I own a broom. This seems unbalanced.",
+    "Another cruiser. I've stopped waving. It never waves back."
+  ],
+  "saucer_down": "Imperial litter, swept. His majesty can invoice me.",
+  "death_1": "Ow. That was my favourite hull.",
+  "death_2": "Marvellous. Now I'm the debris.",
+  "power_up": "Ooh, a shiny thing. I suppose I'll take it. It won't help my mood.",
+  "one_up": "Another life. Another shift, more like.",
+  "game_over": "Planet doomed. I'd say I'm surprised, but my surprise circuits were never fitted.",
+  "hiscore": "A new record. The universe remains, as ever, unimpressed.",
+  "warp_in": "Something's warping in. It's never a tea trolley.",
+  "close_call": "They're getting rather close. I'd complain to management, if I had any.",
+  "invasion": "Rows and rows of them, marching in step. So organised. So sweepable."
+}

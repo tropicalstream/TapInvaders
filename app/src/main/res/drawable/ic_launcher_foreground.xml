@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Big neon crab invader, claws up -->
+    <path android:strokeColor="#FF46E08C" android:strokeWidth="2.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000"
+        android:pathData="M34,40 L74,40 M34,40 L34,54 M74,40 L74,54 M34,54 L74,54" />
+    <path android:strokeColor="#FF46E08C" android:strokeWidth="2.6" android:strokeLineCap="round" android:fillColor="#00000000"
+        android:pathData="M44,40 L38,29 M64,40 L70,29 M34,45 L24,35 M74,45 L84,35 M44,54 L41,64 M64,54 L67,64" />
+    <!-- eyes -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M46,47 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0 M62,47 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0" />
+
+    <!-- invader glow -->
+    <path android:pathData="M54,46 m-25,0 a25,25 0 1,0 50,0 a25,25 0 1,0 -50,0">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="54" android:centerY="46" android:gradientRadius="27">
+                <item android:offset="0.0" android:color="#2E46E08C" />
+                <item android:offset="1.0" android:color="#0046E08C" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- rising bolt -->
+    <path android:strokeColor="#FF7DFFF6" android:strokeWidth="2.6" android:strokeLineCap="round" android:fillColor="#00000000"
+        android:pathData="M54,72 L54,63" />
+
+    <!-- cannon at the bottom, cyan -->
+    <path android:strokeColor="#FF33F0FF" android:strokeWidth="2.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000"
+        android:pathData="M40,90 L68,90 M43,90 L47,82 L61,82 L65,90 M54,82 L54,76" />
+</vector>
