@@ -256,13 +256,14 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
      */
     private fun buildShip3D() {
         val x = game.px; val z = game.playerZ
+        val s = SHIP_SCALE
         val blink = if (game.invuln > 0f) (0.45f + 0.55f * sin(game.time * 20f)) else 1f
         val cr = 0.35f; val cg = 0.95f; val cb = 1f
         val cosR = cos(game.roll); val sinR = sin(game.roll)
         var i = 0
         while (i < SHIP.size) {
-            val lx0 = SHIP[i]; val ly0 = SHIP[i + 1]; val lz0 = SHIP[i + 2]
-            val lx1 = SHIP[i + 3]; val ly1 = SHIP[i + 4]; val lz1 = SHIP[i + 5]
+            val lx0 = SHIP[i] * s; val ly0 = SHIP[i + 1] * s; val lz0 = SHIP[i + 2] * s
+            val lx1 = SHIP[i + 3] * s; val ly1 = SHIP[i + 4] * s; val lz1 = SHIP[i + 5] * s
             lines.line(
                 x + lx0 * cosR - ly0 * sinR, 0.55f + lx0 * sinR + ly0 * cosR, z + lz0,
                 x + lx1 * cosR - ly1 * sinR, 0.55f + lx1 * sinR + ly1 * cosR, z + lz1,
@@ -271,22 +272,23 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
             i += 6
         }
         // canopy glint + engine glow (flickering ember pair)
-        fx.v(x - 1.05f * sinR, 0.55f + 1.05f * cosR, z - 0.3f, 1f, 1f, 1f, blink)
+        fx.v(x - 1.05f * s * sinR, 0.55f + 1.05f * s * cosR, z - 0.3f * s, 1f, 1f, 1f, blink)
         val flick = 0.7f + 0.3f * sin(game.time * 31f)
         hsv(0.07f, 1f, 1f)
-        fx.v(x + (-0.85f * cosR - 0.4f * sinR), 0.55f + (-0.85f * sinR + 0.4f * cosR), z + 1.7f, rgb[0], rgb[1], rgb[2], flick * blink)
-        fx.v(x + (0.85f * cosR - 0.4f * sinR), 0.55f + (0.85f * sinR + 0.4f * cosR), z + 1.7f, rgb[0], rgb[1], rgb[2], flick * blink)
+        fx.v(x + (-0.85f * cosR - 0.4f * sinR) * s, 0.55f + (-0.85f * sinR + 0.4f * cosR) * s, z + 1.7f * s, rgb[0], rgb[1], rgb[2], flick * blink)
+        fx.v(x + (0.85f * cosR - 0.4f * sinR) * s, 0.55f + (0.85f * sinR + 0.4f * cosR) * s, z + 1.7f * s, rgb[0], rgb[1], rgb[2], flick * blink)
         // muzzle flash off the nose while firing
         if (game.muzzle > 0f) {
             val k = game.muzzle / 0.09f
+            val my = 0.55f + 0.5f * s
             hsv(0.13f, 0.8f, 1f)
-            lines.line(x, 1.05f, z - 3.2f, x - 0.5f, 1.05f, z - 2.5f, rgb[0], rgb[1], rgb[2], k)
-            lines.line(x, 1.05f, z - 3.2f, x + 0.5f, 1.05f, z - 2.5f, rgb[0], rgb[1], rgb[2], k)
-            fx.v(x, 1.05f, z - 3.3f, 1f, 1f, 0.8f, k)
+            lines.line(x, my, z - 3.2f * s, x - 0.5f * s, my, z - 2.5f * s, rgb[0], rgb[1], rgb[2], k)
+            lines.line(x, my, z - 3.2f * s, x + 0.5f * s, my, z - 2.5f * s, rgb[0], rgb[1], rgb[2], k)
+            fx.v(x, my, z - 3.3f * s, 1f, 1f, 0.8f, k)
         }
         if (game.invuln > 0f && game.activePower != Game.PWR_SHIELD) {
             hsv((game.time * 0.5f) % 1f, 0.6f, 1f)
-            ring(x, 0.8f, z, 2.6f, 12, rgb[0], rgb[1], rgb[2], 0.4f * blink)
+            ring(x, 0.8f, z, 2.6f * s, 12, rgb[0], rgb[1], rgb[2], 0.4f * blink)
         }
     }
 
@@ -619,7 +621,8 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
 
         // The FPS interceptor: 3D line segments (x0,y0,z0, x1,y1,z1)*, local
         // space, nose toward -z. Raised spine, keel, swept wings, tip fins,
-        // twin engine pods, gun barrel.
+        // twin engine pods, gun barrel. Drawn at SHIP_SCALE.
+        const val SHIP_SCALE = 0.8f
         val SHIP = floatArrayOf(
             // spine
             0f, 0.5f, -2.4f, 0f, 1.05f, -0.3f,
