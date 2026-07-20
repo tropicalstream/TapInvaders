@@ -25,8 +25,24 @@ interface GameHost {
 }
 
 class Bolt(var x: Float, var z: Float, val pierce: Boolean) { var dead = false }
-class InvMissile(var x: Float, var z: Float, val spawnZ: Float, val spawnY: Float) { var dead = false }
+class InvMissile(var x: Float, var z: Float, val spawnZ: Float, val spawnY: Float) {
+    var dead = false
+    var vx = 0f              // aimed/fanned shots drift sideways as they fall
+}
 class PowerDrop(var x: Float, var z: Float, val type: Int) { var dead = false }
+
+/** A rack invader gone rogue: loops off its slot, strafes the cannon
+ *  Galaga-style, and — if it lives — swings home to march again. */
+class Diver(val idx: Int, val type: Int, var x: Float, var z: Float) {
+    val sx = x; val sz = z
+    var t = 0f
+    var weave = 0f
+    var fireT = 0.7f
+    val loopDir = if (x > 0f) -1f else 1f
+}
+
+/** The minelayer cruiser's parting gifts: armed, drifting, shootable. */
+class Mine(var x: Float, var z: Float) { var age = 0f }
 
 class Particle {
     var x = 0f; var y = 0f; var z = 0f
@@ -70,6 +86,18 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         const val BW = 5
         const val BH = 3
         const val CELL = 0.8f
+
+        // The imperial cruiser's arsenal (REMIX): a different weapon each
+        // wave, cycling — and each full cycle it grows a little hastier.
+        const val WPN_SCATTER = 0    // fans of falling fire mid-crossing
+        const val WPN_TRACTOR = 1    // drags the cannon toward its shadow
+        const val WPN_NECRO = 2      // resurrects the fallen rack, slot by slot
+        const val WPN_MAGNET = 3     // bends and swallows bolts; pierce flies true
+        const val WPN_MINE = 4       // seeds drifting proximity mines
+        const val WPN_LANCE = 5      // telegraphs your column, then burns it
+        val WPN_NAMES = arrayOf(
+            "SCATTERBOMB", "TRACTOR BEAM", "NECRO RAY",
+            "MAGNET MAW", "MINELAYER", "COLUMN LANCE")
     }
 
     var state = GameState.TITLE; private set
@@ -141,6 +169,24 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
     var ufoDir = 0f; private set             // 0 = absent
     var ufoT = 0f; private set
     private var ufoTimer = 14f
+
+    // --- the cruiser's arsenal (remix) ---
+    var cruiserWeapon = -1; private set
+    private var wpnT = 0f
+    val mines = ArrayList<Mine>()
+    var lanceX = 0f; private set
+    var lanceT = 0f; private set             // telegraph countdown
+    var strikeT = 0f; private set            // beam afterglow
+    val tractorActive get() =
+        cruiserWeapon == WPN_TRACTOR && ufoDir != 0f && playerAlive && abs(px - ufoX) < 8f
+
+    // --- galaga divers (remix, wave 6 onward) ---
+    val divers = ArrayList<Diver>()
+    val divingMask = BooleanArray(ROWS * COLS)
+    private var diveT = 6f
+
+    /** Desk-test hook: start at a chosen wave (adb --ei wave N). */
+    var debugWave = 0
 
     // --- power-ups (remix) ---
     var activePower = -1; private set
@@ -244,7 +290,7 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         selMode = m.ordinal
         score = 0
         lives = 3
-        wave = 1
+        wave = if (debugWave > 0) debugWave else 1
         nextLifeAt = EXTRA_LIFE_EVERY
         activePower = -1
         highScore = store.highScore(m.ordinal)
@@ -290,8 +336,12 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         beatNote = 0
         missileT = 2.2f
         bolts.clear(); missiles.clear(); drops.clear()
+        divers.clear(); java.util.Arrays.fill(divingMask, false)
+        mines.clear(); lanceT = 0f; strikeT = 0f; cruiserWeapon = -1
+        diveT = 10f + rng.nextFloat() * 3f
         ufoDir = 0f
         ufoTimer = 12f + rng.nextFloat() * 10f
+        if (debugWave > 0) { diveT = 1.2f; ufoTimer = 2.5f }   // desk-test: everything sooner
         saidCloseCall = false
 
         // Fresh bunkers each wave (classic tradition), full hp.
@@ -375,6 +425,148 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         stepBolts(dt)
         stepDrops(dt)
         stepUfo(dt, slow)
+        if (mode == Mode.REMIX) {
+            stepDivers(dt, slow)
+            stepMines(dt, slow)
+            stepLance(dt)
+        }
+    }
+
+    // ---------------------------------------- galaga divers (remix, wave 6+)
+
+    /** The front survivor of a random column peels off to strafe the cannon. */
+    private fun launchDiver() {
+        var tries = 0
+        while (tries++ < 16) {
+            val c = rng.nextInt(COLS)
+            for (r in ROWS - 1 downTo 0) {
+                val idx = r * COLS + c
+                if (!alive[idx]) continue
+                if (!divingMask[idx]) {
+                    divingMask[idx] = true
+                    divers.add(Diver(idx, rowType(r), colX(c), rowZ(r)))
+                    host.sfx(Sfx.WARP, 1.5f, 0.5f)
+                    return
+                }
+                break   // the column's front survivor is already out — try another
+            }
+        }
+    }
+
+    private fun stepDivers(dt: Float, slow: Float) {
+        if (wave >= 6 && state == GameState.PLAYING) {
+            diveT -= dt * slow
+            val cap = (1 + (wave - 6) / 2).coerceAtMost(3)
+            if (diveT <= 0f && divers.size < cap && aliveCount > divers.size) {
+                diveT = 10f + rng.nextFloat() * 3f   // a diver every 10-13 s on average
+                launchDiver()
+            }
+        }
+        var i = divers.size - 1
+        while (i >= 0) {
+            val d = divers[i]
+            d.t += dt * slow
+            if (d.t < 0.85f) {
+                // The peel-off: a tight loop flourish above its slot.
+                val a = d.t / 0.85f * 6.2832f
+                d.x = d.sx + d.loopDir * (1f - cos(a)) * 1.6f
+                d.z = d.sz - sin(a) * 1.9f
+            } else {
+                // The swoop: weaving descent that leans toward the cannon.
+                d.weave += dt * slow * (5f + wave * 0.1f)
+                d.z += (7.5f + wave * 0.35f).coerceAtMost(13f) * slow * dt
+                d.x += (sin(d.weave) * 4.2f + (px - d.x) * 0.55f) * slow * dt
+                d.x = d.x.coerceIn(-halfW + 1f, halfW - 1f)
+                d.fireT -= dt * slow
+                if (d.fireT <= 0f && d.z < playerZ - 4f) {
+                    d.fireT = 0.75f + rng.nextFloat() * 0.5f
+                    val m = InvMissile(d.x, d.z + 0.8f, d.z + 0.8f, 1.5f)
+                    m.vx = ((px - d.x) / 3f).coerceIn(-4f, 4f)
+                    missiles.add(m)
+                    host.sfx(Sfx.INV_FIRE, 1.25f, 0.5f)
+                }
+            }
+            // Body-checks the cannon on the way past.
+            if (playerAlive && invuln <= 0f && abs(d.x - px) < 1.35f && abs(d.z - playerZ) < 1.1f) {
+                diverKilled(i)
+                playerHit()
+                i--; continue
+            }
+            // Past the line: swing wide and warp home to march again.
+            if (d.z > playerZ + 2.6f) {
+                divingMask[d.idx] = false
+                explode(colX(d.idx % COLS), 0.4f, rowZ(d.idx / COLS), 0.55f, 8, 2f)
+                divers.removeAt(i)
+            }
+            i--
+        }
+    }
+
+    /** A diver picked off mid-swoop pays double — the Galaga bargain. */
+    private fun diverKilled(i: Int) {
+        val d = divers.removeAt(i)
+        divingMask[d.idx] = false
+        alive[d.idx] = false
+        aliveCount--
+        addScore(2 * when (d.type) { 0 -> 30; 1 -> 20; else -> 10 })
+        explode(d.x, 1f, d.z, rng.nextFloat(), 30, 5f)
+        host.sfx(Sfx.INV_DIE, 1.3f)
+        if (rng.nextFloat() < 0.18f) {
+            drops.add(PowerDrop(d.x, d.z, rng.nextInt(5)))
+            host.sfx(Sfx.PWR_DROP)
+        }
+    }
+
+    private fun recallDivers() {
+        for (d in divers) divingMask[d.idx] = false
+        divers.clear()
+    }
+
+    // ------------------------------------------- the cruiser's arsenal aides
+
+    private fun stepMines(dt: Float, slow: Float) {
+        var i = mines.size - 1
+        while (i >= 0) {
+            val m = mines[i]
+            m.age += dt * slow
+            m.z += 2.1f * slow * dt
+            if (m.age > 8f || m.z > playerZ + 2f) {
+                explode(m.x, 0.8f, m.z, 0.08f, 10, 3f)   // fizzles out
+                mines.removeAt(i); i--; continue
+            }
+            // Armed and near: burst into a shrapnel fan.
+            if (m.age > 0.6f && playerAlive &&
+                abs(m.x - px) < 3.4f && abs(m.z - playerZ) < 4.2f
+            ) {
+                for (k in -1..1) {
+                    val sm = InvMissile(m.x, m.z, m.z, 1.2f)
+                    sm.vx = k * 3.2f
+                    missiles.add(sm)
+                }
+                explode(m.x, 0.8f, m.z, 0.05f, 22, 5f)
+                host.sfx(Sfx.UFO_DIE, 1.4f, 0.7f)
+                mines.removeAt(i); i--; continue
+            }
+            i--
+        }
+    }
+
+    private fun stepLance(dt: Float) {
+        strikeT = maxOf(0f, strikeT - dt)
+        if (lanceT <= 0f) return
+        lanceT -= dt
+        if (lanceT > 0f) return
+        // The burn: everything down the marked column, bunker cells included.
+        strikeT = 0.18f
+        host.sfx(Sfx.UFO_DIE, 0.6f, 0.9f)
+        if (playerAlive && invuln <= 0f && abs(px - lanceX) < 1.25f) playerHit()
+        for (b in 0 until BUNKERS) for (i2 in 0 until BW) for (j in 0 until BH) {
+            val idx = (b * BW + i2) * BH + j
+            if (shieldHp[idx] <= 0) continue
+            cellPos(b, i2, j, cellScratch)
+            if (abs(cellScratch[0] - lanceX) < 0.9f) shieldHp[idx] = 0
+        }
+        explode(lanceX, 0.8f, playerZ - 4f, 0.62f, 18, 4f)
     }
 
     private fun stepPlayer(dt: Float) {
@@ -448,7 +640,8 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         while (tries++ < 20) {
             val c = rng.nextInt(COLS)
             for (r in ROWS - 1 downTo 0) {
-                if (alive[r * COLS + c]) {
+                val idx = r * COLS + c
+                if (alive[idx] && !divingMask[idx]) {   // a diving slot fires mid-swoop, not from the rack
                     val y = 1.5f + (ROWS - 1 - r) * 1.4f // FPS render height at spawn
                     missiles.add(InvMissile(colX(c), rowZ(r) + 1f, rowZ(r) + 1f, y))
                     host.sfx(Sfx.INV_FIRE, 0.9f + rng.nextFloat() * 0.2f, 0.5f)
@@ -469,6 +662,10 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         while (i >= 0) {
             val m = missiles[i]
             m.z += speed * dt
+            if (m.vx != 0f) {
+                m.x += m.vx * slow * dt
+                if (abs(m.x) > halfW - 0.5f) m.vx = -m.vx   // fan shots ricochet off the rails
+            }
             if (m.z > playerZ + 3f) { missiles.removeAt(i); i--; continue }
             // vs shields
             if (hitShield(m.x, m.z)) { missiles.removeAt(i); i--; continue }
@@ -499,8 +696,50 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
             val b = bolts[i]
             b.z -= BOLT_SPEED * dt
             var consumed = b.z < rackStartZ - 8f
+            // MAGNET MAW: the cruiser bends ordinary bolts into its mouth and
+            // swallows them whole. Piercing bolts fly true — its one weakness.
+            if (!consumed && !b.pierce && cruiserWeapon == WPN_MAGNET && ufoDir != 0f &&
+                abs(b.z - ufoZ) < 7f
+            ) {
+                val dx = ufoX - b.x
+                if (abs(dx) < 6f) {
+                    b.x += (if (dx > 0) 1f else -1f) * 14f * dt * (1f - abs(dx) / 6f)
+                    if (abs(ufoX - b.x) < 1.4f && abs(b.z - ufoZ) < 1.6f) {
+                        consumed = true
+                        explode(b.x, 1.2f, b.z, 0.9f, 6, 2f)
+                        host.sfx(Sfx.SHIELD_HIT, 1.6f, 0.4f)
+                    }
+                }
+            }
             // vs shields (your own shots chew your own cover — tradition)
             if (!consumed && !b.pierce && hitShield(b.x, b.z)) consumed = true
+            // vs galaga divers — mid-swoop kills pay double
+            if (!consumed && divers.isNotEmpty()) {
+                var di = divers.size - 1
+                while (di >= 0) {
+                    val d = divers[di]
+                    if (abs(b.x - d.x) < 1.15f && abs(b.z - d.z) < 0.95f) {
+                        diverKilled(di)
+                        if (!b.pierce) { consumed = true; break }
+                    }
+                    di--
+                }
+            }
+            // vs mines — popping one safely pays a little
+            if (!consumed && mines.isNotEmpty()) {
+                var mi = mines.size - 1
+                while (mi >= 0) {
+                    val m = mines[mi]
+                    if (abs(b.x - m.x) < 1.0f && abs(b.z - m.z) < 1.0f) {
+                        mines.removeAt(mi)
+                        addScore(25)
+                        explode(m.x, 0.8f, m.z, 0.08f, 16, 4f)
+                        host.sfx(Sfx.POP, 1.1f)
+                        if (!b.pierce) { consumed = true; break }
+                    }
+                    mi--
+                }
+            }
             // FPS: enemy fire can be shot down — the fireball is the target.
             if (!consumed && isFps) {
                 var mi = missiles.size - 1
@@ -524,7 +763,7 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
                     var hit = false
                     for (c in 0 until COLS) {
                         val idx = r * COLS + c
-                        if (!alive[idx]) continue
+                        if (!alive[idx] || divingMask[idx]) continue   // its body is out diving
                         if (abs(b.x - colX(c)) < 1.05f && abs(b.z - rowZ(r)) < 0.85f) {
                             killInvader(r, c)
                             if (!b.pierce) consumed = true
@@ -589,7 +828,11 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
                 host.sfx(Sfx.WARP)
                 host.startUfoLoop()
                 if (voiceFull) host.say("saucer_big")
-                flash("IMPERIAL CRUISER", 1.4f)
+                // In REMIX the cruiser arrives ARMED — a new trick every wave.
+                cruiserWeapon = if (mode == Mode.REMIX && wave >= 2) (wave - 2) % 6 else -1
+                wpnT = 1.1f
+                if (cruiserWeapon >= 0) flash("CRUISER: ${WPN_NAMES[cruiserWeapon]}", 1.8f)
+                else flash("IMPERIAL CRUISER", 1.4f)
             }
             return
         }
@@ -598,7 +841,60 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         if (ufoX * ufoDir > halfW + 2.5f) {
             ufoDir = 0f
             ufoTimer = 14f + rng.nextFloat() * 12f
+            cruiserWeapon = -1
+            lanceT = 0f
             host.stopUfoLoop()
+        }
+
+        // The arsenal at work while it crosses. Each completed cycle of six
+        // waves returns a familiar weapon, hastier than before.
+        if (cruiserWeapon >= 0 && ufoDir != 0f && state == GameState.PLAYING) {
+            val haste = 1f + 0.25f * ((wave - 2) / 6)
+            wpnT -= dt * slow * haste
+            when (cruiserWeapon) {
+                WPN_SCATTER -> if (wpnT <= 0f) {
+                    wpnT = 1.7f
+                    for (k in -2..2) {
+                        val m = InvMissile(ufoX, ufoZ + 1f, ufoZ + 1f, 9f)
+                        m.vx = k * 1.7f
+                        missiles.add(m)
+                    }
+                    host.sfx(Sfx.INV_FIRE, 0.7f, 0.7f)
+                }
+                WPN_TRACTOR -> {
+                    if (tractorActive && invuln <= 0f) {
+                        val pull = if (ufoX > px) 1f else -1f
+                        px = (px + pull * 4.8f * slow * dt).coerceIn(-(halfW - 1.4f), halfW - 1.4f)
+                        if (wpnT <= 0f) { wpnT = 0.28f; host.sfx(Sfx.INCOMING, 0.6f, 0.35f) }
+                    }
+                }
+                WPN_NECRO -> if (wpnT <= 0f) {
+                    wpnT = 2.1f
+                    // Breathe a fallen invader back into the rack, deepest first.
+                    outer@ for (r in 0 until ROWS) for (c in 0 until COLS) {
+                        val idx = r * COLS + c
+                        if (!alive[idx]) {
+                            alive[idx] = true
+                            aliveCount++
+                            explode(colX(c), 0.6f, rowZ(r), 0.33f, 16, 3f)
+                            host.sfx(Sfx.WARP, 1.7f, 0.6f)
+                            break@outer
+                        }
+                    }
+                }
+                WPN_MAGNET -> {}   // passive: the maw lives in stepBolts
+                WPN_MINE -> if (wpnT <= 0f && mines.size < 4) {
+                    wpnT = 1.5f
+                    mines.add(Mine(ufoX, ufoZ + 1.6f))
+                    host.sfx(Sfx.PWR_DROP, 0.7f, 0.6f)
+                }
+                WPN_LANCE -> if (wpnT <= 0f && lanceT <= 0f) {
+                    wpnT = 2.8f
+                    lanceX = px
+                    lanceT = 0.95f   // the telegraph: dodge or die
+                    host.sfx(Sfx.WARP, 0.5f, 0.7f)
+                }
+            }
         }
     }
 
@@ -665,6 +961,8 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
             state = GameState.LIFE_LOST
             stateT = 1.7f
             missiles.clear()
+            recallDivers()   // the strafers warp home while the broom respawns
+            lanceT = 0f
             deathAlt = !deathAlt
             if (voiceSparse) host.say(if (deathAlt) "death_1" else "death_2", urgent = true)
         }

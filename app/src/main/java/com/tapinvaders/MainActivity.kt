@@ -63,6 +63,8 @@ class MainActivity : Activity(), GameHost {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
         game.boot()
+        // Desk-test hook: `adb shell am start ... --ei wave 6` starts runs there.
+        game.debugWave = intent?.getIntExtra("wave", 0) ?: 0
     }
 
     // ------------------------------------------------------------ GameHost

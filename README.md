@@ -19,6 +19,17 @@ Swipe on the title to choose, tap to clock in:
   particle bursts, the sweeper's deadpan voice lines, and **power-ups that
   drop from dying invaders** — Rapid Fire, Triple Shot, Shield, Piercing
   Bolts, Time Warp — caught with the cannon, ten seconds each.
+  From **wave 6** the rack learns Galaga manners: front-row invaders peel
+  off in a loop and **strafe the cannon** — weaving, firing aimed shots,
+  body-checking — then swing home to march again. Pick one off mid-dive
+  for **double points** (and better power-up odds). And from wave 2 the
+  imperial cruiser arrives **armed**, a different weapon every wave,
+  cycling and hastening: SCATTERBOMB (fans of falling fire), TRACTOR BEAM
+  (drags the cannon toward its shadow), NECRO RAY (resurrects the fallen
+  rack, slot by slot — kill it quick), MAGNET MAW (bends and swallows
+  bolts; only piercing shots fly true), MINELAYER (drifting proximity
+  mines, shootable for +25), COLUMN LANCE (telegraphs your column, then
+  burns it — bunkers included).
 - **FPS 3D** — stand on the firing line, behind the stick of a full 3D
   wireframe interceptor riding the bottom of your view — raised spine, swept
   wings, tip fins, twin flickering engine pods — that **banks into every

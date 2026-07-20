@@ -140,6 +140,7 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         buildMissiles()
         buildDrops()
         if (game.ufoDir != 0f) buildUfo()
+        if (game.mode == Mode.REMIX) buildArsenal()
         val ps = game.particles
         for (i in 0 until ps.size) {
             val p = ps[i]
@@ -194,7 +195,8 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
             val baseY = if (game.isFps) 1.5f + (Game.ROWS - 1 - r) * 1.4f else 0.15f
             val scale = if (game.isFps) 0.8f else 0.95f
             for (c in 0 until Game.COLS) {
-                if (!game.alive[r * Game.COLS + c]) continue
+                val idx = r * Game.COLS + c
+                if (!game.alive[idx] || game.divingMask[idx]) continue   // diving bodies drawn in flight
                 drawSprite(segs, game.colX(c), baseY, game.rowZ(r), scale, cr, cg, cb, 0.95f)
             }
         }
@@ -208,6 +210,80 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                 0 -> hsv(0.86f, 0.8f, 1f)   // magenta command row
                 1 -> hsv(0.52f, 0.8f, 1f)   // cyan mid ranks
                 else -> hsv(0.34f, 0.8f, 1f) // green front line
+            }
+        }
+    }
+
+    /** REMIX extras: galaga divers in flight + the cruiser's arsenal. */
+    private fun buildArsenal() {
+        val t = game.time
+        // Divers wear a hotter, faster hue than the rack they left.
+        val frame = game.marchFrame
+        for (i in 0 until game.divers.size) {
+            val d = game.divers[i]
+            hsv((0.02f + t * 0.35f) % 1f, 0.95f, 1f)
+            drawSprite(sprite(d.type, frame), d.x, 0.15f, d.z, 1.05f, rgb[0], rgb[1], rgb[2], 1f)
+            fx.v(d.x, 0.5f, d.z - 0.9f, rgb[0], rgb[1], rgb[2], 0.6f)   // exhaust spark
+        }
+        // Mines: slow-spinning diamonds, pulsing angrier as they age.
+        for (i in 0 until game.mines.size) {
+            val m = game.mines[i]
+            val pulse = 0.5f + 0.5f * sin(t * (4f + m.age * 1.5f))
+            hsv(0.03f, 1f, 1f)
+            val s = 0.7f
+            var a0 = t * 2.2f
+            var px0 = m.x + cos(a0) * s; var pz0 = m.z + sin(a0) * s
+            for (k in 1..4) {
+                val aa = t * 2.2f + k * 1.5708f
+                val px1 = m.x + cos(aa) * s; val pz1 = m.z + sin(aa) * s
+                lines.line(px0, 0.5f, pz0, px1, 0.5f, pz1, rgb[0], rgb[1], rgb[2], 0.4f + 0.6f * pulse)
+                px0 = px1; pz0 = pz1
+            }
+            fx.v(m.x, 0.6f, m.z, 1f, 0.6f, 0.2f, pulse)
+        }
+        // Tractor beam: flickering light converging on the caught cannon.
+        if (game.tractorActive) {
+            hsv((0.55f + t * 0.2f) % 1f, 0.7f, 1f)
+            val flick = 0.3f + 0.3f * sin(t * 23f)
+            for (k in 0..3) {
+                val off = -1.4f + k * 0.933f
+                lines.line(game.ufoX + off, 1.2f, game.ufoZ,
+                    game.px + off * 0.4f, 0.4f, game.playerZ, rgb[0], rgb[1], rgb[2], flick)
+            }
+        }
+        // Column lance: the cruiser holds a bead on a column, then burns it.
+        // The beam must clearly ISSUE from the cruiser (ufoX/ufoZ) even as it
+        // crosses — a diagonal aiming line down onto the doomed column.
+        if (game.lanceT > 0f && game.ufoDir != 0f) {
+            val warn = 0.15f + 0.35f * sin(t * 30f)
+            // aiming beam from the cruiser to the head of the marked column
+            lines.line(game.ufoX, 1.2f, game.ufoZ,
+                game.lanceX, 0.35f, game.playerZ - 2f, 1f, 0.25f, 0.2f, warn)
+            // the column itself shimmers, front row down to the firing line
+            lines.line(game.lanceX, 0.3f, game.ufoZ + 2f,
+                game.lanceX, 0.3f, game.playerZ + 1f, 1f, 0.3f, 0.25f, warn * 0.7f)
+        }
+        if (game.strikeT > 0f) {
+            val k = game.strikeT / 0.18f
+            for (off in -1..1) {
+                // the searing lance, still rooted at the cruiser's nose
+                lines.line(game.ufoX + off * 0.15f, 1.2f, game.ufoZ,
+                    game.lanceX + off * 0.2f, 0.4f, game.playerZ, 1f, 0.5f, 0.25f, k)
+                // and the whole column ignited top to bottom
+                lines.line(game.lanceX + off * 0.2f, 0.4f, game.ufoZ + 2f,
+                    game.lanceX + off * 0.2f, 0.4f, game.playerZ + 1f, 1f, 0.5f, 0.25f, k)
+            }
+        }
+        // Magnet maw: a hungry rotating ring around the cruiser.
+        if (game.cruiserWeapon == Game.WPN_MAGNET && game.ufoDir != 0f) {
+            hsv((0.8f + t * 0.3f) % 1f, 0.8f, 1f)
+            val rr = 2.6f + 0.4f * sin(t * 6f)
+            var x0 = game.ufoX + cos(t * 1.5f) * rr; var z0 = game.ufoZ + sin(t * 1.5f) * rr
+            for (k in 1..10) {
+                val aa = t * 1.5f + k * 0.6283f
+                val x1 = game.ufoX + cos(aa) * rr; val z1 = game.ufoZ + sin(aa) * rr
+                lines.line(x0, 1.0f, z0, x1, 1.0f, z1, rgb[0], rgb[1], rgb[2], 0.5f)
+                x0 = x1; z0 = z1
             }
         }
     }
